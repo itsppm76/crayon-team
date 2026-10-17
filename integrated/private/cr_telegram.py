@@ -241,6 +241,7 @@ def msg_private_invalid(uid):
 
 
 def _handle_text(uid, chat_id, name, text, message_id, out):
+    delivery_name = 'Discord' if __import__('cr_channel').channel.get()=='discord' else 'Telegram'
     if looks_like_secret(text):
         out.delete(chat_id, message_id)
         out.send(chat_id, "That looked like a password or key, so I deleted your message and did not save it. Don't paste secrets here. If it was real, rotate it.")
@@ -362,7 +363,7 @@ def _handle_text(uid, chat_id, name, text, message_id, out):
             if cmd != "/disconnect_google" and not G.configured():
                 raise G.GoogleError("Google setup is not active yet")
             if cmd == "/connect_google":
-                out.send(chat_id, "Open this link to connect your own Google account:\n" + G.begin(uid) + "\n\nThis link is only for your Telegram account. Don't forward it. Friends must type 'connect Google' in their own private Crayon chat. Choose your whitelisted Google email, then review Google's permissions. This link works even if you don't see a Connect Google button.\n\nCrayon is in testing mode: only approved tester emails can connect, and access may need renewing after 7 days. Mail/calendar results stay in this private chat and aren't sent to the AI model or permanent memory. Tokens are encrypted. I show each email draft before you approve sending. Say enable calendar booking for an optional calendar-write reconnect, or turn on email checks for hourly metadata-only checks of your own account during awake hours.\n\nPrivacy: " + C.PUBLIC_URL + "/privacy\nYou can always type 'connect Google' or /connect_google to get a fresh link.")
+                out.send(chat_id, "Open this link to connect your own Google account:\n" + G.begin(uid) + "\n\nThis link is only for your " + delivery_name + " account. Don't forward it. Friends must type 'connect Google' in their own private Crayon chat. Choose your whitelisted Google email, then review Google's permissions. This link works even if you don't see a Connect Google button.\n\nCrayon is in testing mode: only approved tester emails can connect, and access may need renewing after 7 days. Mail/calendar results stay in this private chat and aren't sent to the AI model or permanent memory. Tokens are encrypted. I show each email draft before you approve sending. Say enable calendar booking for an optional calendar-write reconnect, or turn on email checks for hourly metadata-only checks of your own account during awake hours.\n\nPrivacy: " + C.PUBLIC_URL + "/privacy\nYou can always type 'connect Google' or /connect_google to get a fresh link.")
             elif cmd == "/disconnect_google":
                 r=G.disconnect(uid)
                 out.send(chat_id, "Stored Google credentials and pending drafts removed. " + ("Google revocation confirmed." if r["revoked"] else "Google revocation was not confirmed; remove Crayon access in your Google account too."))
@@ -457,7 +458,7 @@ def _handle_text(uid, chat_id, name, text, message_id, out):
                 db.audit(uid,'attachment_sent',item['filename']+' message='+str(ident))
             except Exception as e:
                 log.warning('attachment failed: %s',redact(str(e))[:180])
-                out.send(chat_id,"I made the file, but Telegram delivery wasn't confirmed. Don't count on receiving it.")
+                out.send(chat_id,"I made the file, but " + delivery_name + " delivery wasn't confirmed. Don't count on receiving it.")
 
 
 def handle_callback(cb, out):
