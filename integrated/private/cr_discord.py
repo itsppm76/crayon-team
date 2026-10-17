@@ -21,6 +21,7 @@ import cr_db as db
 log = logging.getLogger('crayon.discord')
 API = 'https://discord.com/api/v10'
 MAX_BYTES = 20_000_000
+PROVIDER = 'discord'
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS discord_accounts(
  subject TEXT PRIMARY KEY, user_id BIGINT UNIQUE NOT NULL,
@@ -63,6 +64,8 @@ def init():
     for stmt in SCHEMA.split(';'):
         if stmt.strip():
             db.q(stmt, fetch='none')
+    # Backfill routing ownership before any other transport consumer can see it.
+    db.q("INSERT INTO account_identities(provider,subject,user_id) SELECT 'discord',subject,user_id FROM discord_accounts ON CONFLICT DO NOTHING",fetch='none')
     # Never replay a request after a crash: it may already have changed something.
     db.q("UPDATE discord_inbox SET state='uncertain' WHERE state='processing'", fetch='none')
     db.q("UPDATE discord_controls SET state='uncertain',encrypted='' WHERE state='claimed'", fetch='none')
@@ -76,6 +79,12 @@ def cleanup(uid):
         if stmt.strip():db.q(stmt,fetch='none')
     for table in ('discord_controls','discord_inbox','discord_accounts'):
         db.q('DELETE FROM '+table+' WHERE user_id=%s',(uid,),'none')
+    db.q("DELETE FROM account_identities WHERE provider='discord' AND user_id=%s",(uid,),'none')
+
+
+def maintenance():
+    db.q("DELETE FROM discord_controls WHERE expires_at<=now()",fetch='none')
+    db.q("DELETE FROM discord_inbox WHERE created_at<now()-interval '7 days'",fetch='none')
 
 
 def account(subject, dm_channel, name=''):
@@ -87,6 +96,7 @@ def account(subject, dm_channel, name=''):
         db.q('SELECT pg_advisory_xact_lock(hashtextextended(%s,0))', ('crayon-discord:'+subject,), 'none')
         row = db.q('SELECT d.user_id FROM discord_accounts d JOIN users u ON u.user_id=d.user_id WHERE d.subject=%s', (subject,), 'one')
         if row:
+            db.q("INSERT INTO account_identities(provider,subject,user_id) VALUES('discord',%s,%s) ON CONFLICT DO NOTHING",(subject,row['user_id']),'none')
             db.q('UPDATE discord_accounts SET dm_channel=%s WHERE subject=%s', (dm_channel,subject), 'none')
             return row['user_id']
         # Deleted accounts may leave routing tombstones; never resurrect old private state.
@@ -94,6 +104,7 @@ def account(subject, dm_channel, name=''):
         uid = db.q("SELECT nextval('crayon_account_ids') AS id", fetch='one')['id']
         db.q('INSERT INTO users(user_id,name) VALUES(%s,%s)', (uid,str(name)[:100]), 'none')
         db.q('INSERT INTO discord_accounts(subject,user_id,dm_channel) VALUES(%s,%s,%s)', (subject,uid,dm_channel), 'none')
+        db.q("INSERT INTO account_identities(provider,subject,user_id) VALUES('discord',%s,%s)",(subject,uid),'none')
         return uid
 
 
@@ -179,6 +190,7 @@ def decrypt(value):
 
 class Out:
     """Canonical send interface. Request controls bind owner, channel AND message."""
+    channel_name='discord'
     def __init__(self, uid, channel, transport=None, subject=None, source_message=None):
         self.uid=uid;self.channel=snowflake(channel);self.transport=transport or Transport()
         self.subject=subject;self.source_message=source_message;self.meta={}
@@ -188,9 +200,6 @@ class Out:
             raise ValueError('Discord private output cannot change audience')
         from cr_safety import clean_text
         text=clean_text(str(text)) or '(empty)'
-        # Shared engine's Telegram wording is not a claim of Telegram delivery.
-        text=text.replace('your Telegram account','your Crayon Discord account')
-        text=text.replace('Telegram delivery','Discord delivery')
         ids=[self.transport.message(self.channel,p) for p in chunks(text)]
         buttons=[]
         if isinstance(markup,dict):
@@ -394,11 +403,13 @@ def build_client():
             # Public-only path does not allocate/read a personal account.
             if __import__('cr_group_actions').action_request(text):
                 await msg.reply('Personal information and actions stay in your private Crayon DM in this Discord pilot. Nothing private was read here.',mention_author=False);return
+            pending.add(str(msg.id))
             try:
                 async with gate:
                     reply=await asyncio.to_thread(__import__('cr_group').answer,{'text':text})
                 for p in chunks(reply):await msg.reply(p,mention_author=False)
             except Exception:await msg.reply('Public answer not confirmed. No private account was accessed.',mention_author=False)
+            finally:pending.discard(str(msg.id))
             return
         if getattr(msg.channel,'type',None)!=discord.ChannelType.private:return
         if limited(subject):
