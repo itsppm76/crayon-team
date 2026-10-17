@@ -8,19 +8,27 @@ ROOT=pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'integrated'/'private'))
 import cr_discord as D
 
-def background():
-    """Only Discord accounts, passed explicit output; no unrelated users/schedulers."""
-    import cr_sched,cr_proactive,cr_work,cr_mail_watch
-    while True:
+def tick_once():
+    """Exact owner and Discord context on every background path."""
+    import cr_sched,cr_proactive,cr_work,cr_mail_watch,cr_channel
+    D.maintenance()
+    rows=D.db.q('SELECT d.user_id,d.subject,d.dm_channel FROM discord_accounts d JOIN users u ON u.user_id=d.user_id')
+    allowed=D.allowed_users()
+    for row in rows:
+        if row['subject'] not in allowed:continue
+        uid=row['user_id'];out=D.Out(uid,row['dm_channel'])
+        token=cr_channel.channel.set('discord')
         try:
-            rows=D.db.q('SELECT d.user_id,d.subject,d.dm_channel FROM discord_accounts d JOIN users u ON u.user_id=d.user_id')
-            for row in rows:
-                if row['subject'] not in D.allowed_users():continue
-                uid=row['user_id'];out=D.Out(uid,row['dm_channel'])
-                cr_sched.tick(out,only_user=uid)
-                cr_proactive.tick(out,only_user=uid)
-                cr_work.tick(out,only_user=uid)
-                cr_mail_watch.tick_user(out,uid)
+            cr_sched.tick(out,only_user=uid)
+            cr_proactive.tick(out,only_user=uid)
+            cr_work.tick(out,only_user=uid)
+            cr_mail_watch.tick_user(out,uid)
+        finally:cr_channel.channel.reset(token)
+
+def background():
+    """Only Discord accounts; no unrelated users/schedulers."""
+    while True:
+        try:tick_once()
         except Exception:
             D.log.warning('Discord background delivery unavailable; no completion claimed')
         time.sleep(30)
