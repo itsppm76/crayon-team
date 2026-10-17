@@ -18,6 +18,10 @@ def tick(out=None, only_user=None):
         out = tg.Out()
     db.q("UPDATE reminders SET status='pending' WHERE status='sending' AND claimed_at < now() - interval '3 minutes'", (), "none")
     cond, params = ("AND user_id=%s", (only_user,)) if only_user is not None else ("AND user_id>0", ())
+    discord_out = getattr(out,'channel_name',None)=='discord'
+    if discord_out and only_user!=getattr(out,'uid',None):raise ValueError('Discord background output requires one exact owner')
+    if not discord_out:
+        cond += " AND NOT EXISTS (SELECT 1 FROM account_identities ai WHERE ai.user_id=reminders.user_id AND ai.provider='discord')"
     rows = db.q(f"""UPDATE reminders SET status='sending', claimed_at=now() WHERE id IN (
                       SELECT id FROM reminders WHERE status='pending' AND due_at <= now() {cond}
                       ORDER BY due_at LIMIT 10 FOR UPDATE SKIP LOCKED) RETURNING *""", params)
@@ -34,7 +38,7 @@ def tick(out=None, only_user=None):
             else:
                 text = "Reminder: " + r["text"] + late_note
             import cr_accounts
-            if not __import__('cr_discord').destination(r['user_id']) and cr_accounts.telegram_destination(r['user_id']) is None:
+            if not discord_out and cr_accounts.telegram_destination(r['user_id']) is None:
                 import cr_web_notifications as N
                 N.publish(r['user_id'],text,'reminder:'+str(r['id'])+':'+r['due_at'].isoformat())
             else:out.send(r['chat_id'],text)
