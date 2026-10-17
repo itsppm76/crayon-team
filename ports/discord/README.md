@@ -116,16 +116,28 @@ package version used in local client-construction tests was 2.7.1.
 ## Verification
 
 From `integrated/private`: `python -m pytest -q`.
-Current full-suite result: 709 passed, including 34 new Discord synthetic tests.
+Current full-suite result: 712 passed, including 37 new Discord synthetic tests.
 Tests cover ID namespace, feature/allowlist gates, disabled-route isolation,
 UTF-16 limits, no pings, no retries, review audience/expiry/one-shot SQL,
 partial-review failure, no false deletion/reactions, account cleanup, dedupe,
 recovery, rate cap, attachment CDN/size validation, input cap and quote audience.
-This does not prove live Discord authentication, real DB races, OAuth, provider
-access, delivery, exact effect behavior or hosting continuity. App and real
+A separate disposable-local-Postgres run passed 25 checks: concurrent identity
+allocation/dedupe, cross-owner/channel/message denial, concurrent double-click,
+DB expiry, payload erasure, opt-in routing, real reminder dispatch, restart
+uncertainty and account cleanup. Run `verify_local_postgres.py` only against a
+disposable loopback database. No provider or Discord network call occurs.
+
+This does not prove live Discord authentication, production DB behavior, OAuth,
+provider access, delivery, exact effect behavior or hosting continuity. App and real
 controlled acceptance are still required.
 
 Official setup/constraint references checked 2026-10-17:
 - https://docs.discord.com/developers/quick-start/getting-started
 - https://docs.discord.com/developers/topics/gateway
 - https://docs.discord.com/developers/resources/message
+
+Local review hardening also covers non-Discord scheduler/work/proactive consumers
+leaving Discord-owned rows untouched, exact-owner background context and reset,
+routine expired-review deletion, and channel-aware wording. These passing local
+checks do not authorize shared production database cutover. The isolated-pilot
+guard remains mandatory.
