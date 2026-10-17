@@ -129,7 +129,7 @@ class DiscordTests(unittest.TestCase):
     def test_cleanup_all_discord_owned_records(self):
         with patch.object(D.db,'q') as q:D.cleanup(UID)
         deletes=[x.args for x in q.call_args_list if x.args[0].startswith('DELETE')]
-        self.assertEqual(len(deletes),3);self.assertTrue(all(x[1]==(UID,) for x in deletes))
+        self.assertEqual(len(deletes),4);self.assertTrue(all(x[1]==(UID,) for x in deletes))
 
     def test_dedupe_atomic(self):
         with patch.object(D.db,'q',return_value=None) as q:self.assertFalse(D.claim(MESSAGE,UID))
@@ -178,3 +178,32 @@ class ClientConstructionTests(unittest.TestCase):
         self.assertFalse(client.allowed_mentions.roles)
 
 if __name__=='__main__':unittest.main()
+
+class DiscordRunnerTests(unittest.TestCase):
+    def runner(self):
+        import importlib.util,pathlib
+        spec=importlib.util.spec_from_file_location('discord_pilot_runner',pathlib.Path(__file__).resolve().parents[2]/'ports/discord/run.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
+
+    def test_runner_exact_owner_context_allowlist_and_restore(self):
+        import cr_sched,cr_proactive,cr_work,cr_mail_watch,cr_channel
+        runner=self.runner();seen=[]
+        def tick(out,only_user=None):seen.append((out.uid,only_user,cr_channel.channel.get()))
+        def mail(out,uid):seen.append((out.uid,uid,cr_channel.channel.get()))
+        rows=[{'user_id':UID,'subject':USER,'dm_channel':CHANNEL},{'user_id':UID+1,'subject':'423456789012345678','dm_channel':CHANNEL}]
+        with patch.dict(os.environ,ENV,clear=True),patch.object(D,'maintenance'),patch.object(D.db,'q',return_value=rows),patch.object(cr_sched,'tick',side_effect=tick),patch.object(cr_proactive,'tick',side_effect=tick),patch.object(cr_work,'tick',side_effect=tick),patch.object(cr_mail_watch,'tick_user',side_effect=mail):
+            old=cr_channel.channel.get();runner.tick_once();self.assertEqual(cr_channel.channel.get(),old)
+        self.assertEqual(seen,[(UID,UID,'discord')]*4)
+
+    def test_runner_restores_context_on_failure(self):
+        import cr_sched,cr_channel
+        runner=self.runner()
+        with patch.dict(os.environ,ENV,clear=True),patch.object(D,'maintenance'),patch.object(D.db,'q',return_value=[{'user_id':UID,'subject':USER,'dm_channel':CHANNEL}]),patch.object(cr_sched,'tick',side_effect=RuntimeError):
+            old=cr_channel.channel.get()
+            with self.assertRaises(RuntimeError):runner.tick_once()
+            self.assertEqual(cr_channel.channel.get(),old)
+
+    def test_runner_refuses_production_database_without_optin(self):
+        runner=self.runner()
+        with patch.dict(os.environ,{},clear=True),patch.object(D.db,'init') as init,self.assertRaises(SystemExit):runner.main()
+        init.assert_not_called()
