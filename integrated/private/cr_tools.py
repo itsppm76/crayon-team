@@ -103,7 +103,7 @@ def set_reminder(ctx, text, at="", in_minutes=None, recurrence=""):
              (ctx["uid"], ctx["chat_id"], text.strip()[:500], due, rec), "one")
     chk = db.q("SELECT due_at,status FROM reminders WHERE id=%s AND user_id=%s", (r["id"], ctx["uid"]), "one")
     ok = bool(chk and chk["status"] == "pending" and abs((chk["due_at"] - due).total_seconds()) < 2)
-    return {"ok": ok, "verified": ok, "id": r["id"], "due_local": due.astimezone(tz).strftime("%a %d %b, %I:%M %p"), "recurrence": rec,"delivery":"private in-app Notifications (no system push)" if __import__("cr_accounts").telegram_destination(ctx["uid"]) is None else "Telegram"}
+    return {"ok": ok, "verified": ok, "id": r["id"], "due_local": due.astimezone(tz).strftime("%a %d %b, %I:%M %p"), "recurrence": rec,"delivery":"Discord private DM (best effort on free hosting)" if __import__("cr_channel").channel.get()=="discord" else "private in-app Notifications (no system push)" if __import__("cr_accounts").telegram_destination(ctx["uid"]) is None else "Telegram"}
 
 
 MAX_JOBS = 5
