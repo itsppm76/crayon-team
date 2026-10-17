@@ -129,7 +129,11 @@ def step_run(step):
 def tick(out,only_user=None):
     # Interrupted work is not retried automatically. Record a block, never invent done.
     db.q("UPDATE work_jobs SET status='blocked',error='Interrupted or timed out. No automatic retry.',updated_at=now() WHERE status IN ('running','pausing') AND updated_at<now()-interval '5 minutes'",(),'none')
+    discord_out=getattr(out,'channel_name',None)=='discord'
+    if discord_out and only_user!=getattr(out,'uid',None):raise ValueError('Discord background output requires one exact owner')
     cond=' AND user_id=%s' if only_user is not None else ' AND user_id>0'
+    if not discord_out:
+        cond+=" AND NOT EXISTS (SELECT 1 FROM account_identities ai WHERE ai.user_id=work_jobs.user_id AND ai.provider='discord')"
     row=db.q("UPDATE work_jobs SET status='running',updated_at=now() WHERE id=(SELECT id FROM work_jobs WHERE status='queued'"+cond+" ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *",(only_user,) if only_user is not None else (),'one')
     if row:
         uid=row['user_id'];results=row['results'] or []
@@ -156,7 +160,7 @@ def tick(out,only_user=None):
             if not claimed:continue
             try:
                 import cr_accounts
-                if cr_accounts.telegram_destination(uid) is None:
+                if not discord_out and cr_accounts.telegram_destination(uid) is None:
                     import cr_web_notifications as N
                     N.publish(uid,view(fresh),'work:'+str(item['id']))
                 else:out.send(item['chat_id'],view(fresh),markup=controls_markup(fresh))

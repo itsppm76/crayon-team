@@ -16,7 +16,7 @@ def set_option(uid, chat_id, key, value):
     s = settings(uid)
     s[key] = value
     s["chat_id"] = chat_id
-    s["delivery"] = "telegram"
+    s["delivery"] = "discord" if __import__("cr_channel").channel.get()=="discord" else "telegram"
     db.q("UPDATE users SET settings=%s::jsonb WHERE user_id=%s", (json.dumps(s), uid), "none")
     return settings(uid).get(key) == value
 
@@ -43,7 +43,10 @@ def digest_text(uid):
     return "\n".join(lines)
 
 def tick(out, only_user=None):
+    if getattr(out,'channel_name',None)=='discord' and only_user!=getattr(out,'uid',None):raise ValueError('Discord background output requires one exact owner')
     cond = "user_id=%s" if only_user is not None else "user_id>0"
+    if getattr(out,'channel_name',None)!='discord':
+        cond += " AND NOT EXISTS (SELECT 1 FROM account_identities ai WHERE ai.user_id=users.user_id AND ai.provider='discord')"
     rows = db.q("SELECT user_id,settings FROM users WHERE " + cond, (only_user,) if only_user is not None else ())
     sent=[]
     for row in rows:
